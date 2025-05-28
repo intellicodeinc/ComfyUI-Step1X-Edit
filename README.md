@@ -2,6 +2,13 @@
 
 ComfyUI Custom Node for [Step1X-Edit](https://github.com/stepfun-ai/Step1X-Edit/). Noted this node may consume large VRAMs!
 
+This repository is a modified version of [original project URL](https://github.com/quank123wip/ComfyUI-Step1X-Edit).
+Modifications were made by wonbinK in 2025.
+
+## Modification
+- Split node into (```Step 1X Edit Loader```) Loader and (```Step 1X Edit Generator```) Generator 
+- You can find those nodes in intellicode/Step1X-Edit (ComfyUI node)
+
 ## Installation
 
 1. Navigate to your ComfyUI's custom_nodes directory:
@@ -11,7 +18,7 @@ cd ComfyUI/custom_nodes
 
 2. Clone this repository:
 ```bash
-git clone https://github.com/Quank123WIP/ComfyUI-Step1X-Edit
+git clone https://github.com/intellicodeinc/ComfyUI-Step1X-Edit
 ```
 
 3. Install requirements:
@@ -48,3 +55,4 @@ The results produced by this image editing model are entirely determined by user
 ## License
 
 MIT License
+

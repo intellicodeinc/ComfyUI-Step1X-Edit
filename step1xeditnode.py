@@ -8,6 +8,7 @@ import itertools
 import math
 import time
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import torch
@@ -418,6 +419,159 @@ class ImageGenerator:
             break
         return img
 
+class ConditionedImageGenerator(ImageGenerator):
+    
+    def as_input_process_image(self, img, ref_size, criteria : Literal["width", "height"]= "height", fit_to_ref : bool = True):
+        img = self.tensor2pil(img)
+        w, h = img.size
+        r = w / h 
+
+        LEFT, TOP, RIGHT, BOTTOM = 0, 1, 2, 3
+
+        ref_w, ref_h = ref_size
+        crop = [0, 0, 0, 0]
+        if criteria == "height":
+            h_new = ref_h
+            r = ref_h / h
+            w_new = math.ceil(w * r)
+            crop[LEFT] = (w_new - ref_w) // 2     
+            crop[RIGHT] = crop[LEFT] + ref_w
+        else:
+            w_new = ref_w
+            r = ref_w / w
+            h_new = math.ceil(h * r)
+            crop[TOP] = (h_new - ref_h) // 2
+            crop[BOTTOM] = crop[TOP] + ref_h
+
+        img_resized = img.resize((w_new, h_new))
+
+        if fit_to_ref:
+            img_resized = img_resized.crop(crop)
+            if ref_w != w_new or ref_h != h_new:
+                raise ValueError(f"additional reference image size ({ref_w}x{ref_h}) does not match the base image size ({w_new}x{h_new}).")
+        return img_resized
+    
+    
+    @torch.inference_mode()
+    def generate_image(
+        self,
+        prompt,
+        negative_prompt,
+        ref_images,
+        num_steps,
+        cfg_guidance,
+        seed,
+        num_samples=1,
+        init_image=None,
+        image2image_strength=0.0,
+        show_progress=False,
+        size_level=512,
+        additional_prompt=None,
+        additional_ref_images=None,
+    ):
+        assert num_samples == 1, "num_samples > 1 is not supported yet."
+        # 0. check if additional reference images are used
+        use_add_ref_img = True if additional_ref_images is not None and additional_prompt is not None else False
+            
+        
+        ref_images_raw, img_info = self.input_process_image(ref_images, img_size=size_level)        
+        width, height = ref_images_raw.width, ref_images_raw.height
+        ref_images_raw = self.load_image(ref_images_raw)
+        ref_images_raw = ref_images_raw.to(self.device)
+        
+        """
+           2025-05-27
+            TODO:
+                - add support for multiple ref_images
+                  - how to handle images with different sizes?
+                    (1) resize face reference like in the original code -> padding or cropping side to fit the 1st reference image
+                - add support for multiple prompts
+                  - When multiple prompts are received, each one should explicitly state what the current reference stands for.
+        """
+        # 1. encode reference images
+        if use_add_ref_img:
+            additional_ref_images_raw, additional_img_info = self.input_process_image(additional_ref_images, img_size=size_level)            
+            additional_ref_images_raw = self.load_image(additional_ref_images_raw)
+            additional_ref_images_raw = additional_ref_images_raw.to(self.device)
+        
+        if self.offload:
+            self.ae = self.ae.to(self.device)
+        ref_images = self.ae.encode(ref_images_raw.to(self.device) * 2 - 1)
+
+        # 2. encode additional reference images
+        additional_ref_images = None
+        if use_add_ref_img:
+            additional_ref_images = self.ae.encode(additional_ref_images_raw.to(self.device) * 2 - 1)
+        
+        if self.offload:
+            self.ae = self.ae.cpu()
+            cudagc()
+
+        seed = int(seed)
+        seed = torch.Generator(device="cpu").seed() if seed < 0 else seed
+
+        t0 = time.perf_counter()
+
+        if init_image is not None:
+            init_image = self.load_image(init_image)
+            init_image = init_image.to(self.device)
+            init_image = torch.nn.functional.interpolate(init_image, (height, width))
+            if self.offload:
+                self.ae = self.ae.to(self.device)
+            init_image = self.ae.encode(init_image.to() * 2 - 1)
+            if self.offload:
+                self.ae = self.ae.cpu()
+                cudagc()
+        
+        x = torch.randn(
+            num_samples,
+            16,
+            height // 8,
+            width // 8,
+            device=self.device,
+            dtype=torch.bfloat16,
+            generator=torch.Generator(device=self.device).manual_seed(seed),
+        )
+
+        timesteps = sampling.get_schedule(
+            num_steps, x.shape[-1] * x.shape[-2] // 4, shift=True
+        )
+
+        if init_image is not None:
+            t_idx = int((1 - image2image_strength) * num_steps)
+            t = timesteps[t_idx]
+            timesteps = timesteps[t_idx:]
+            x = t * x + (1.0 - t) * init_image.to(x.dtype)
+
+        x = torch.cat([x, x], dim=0)
+        ref_images = torch.cat([ref_images, ref_images], dim=0)
+        ref_images_raw = torch.cat([ref_images_raw, ref_images_raw], dim=0)
+        inputs = self.prepare([prompt, negative_prompt], x, ref_image=ref_images, ref_image_raw=ref_images_raw)
+        with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16):
+            x = self.denoise(
+                **inputs,
+                cfg_guidance=cfg_guidance,
+                timesteps=timesteps,
+                show_progress=show_progress,
+                timesteps_truncate=1.0,
+            )
+            x = self.unpack(x.float(), height, width)
+            if self.offload:
+                self.ae = self.ae.to(self.device)
+            x = self.ae.decode(x)
+            if self.offload:
+                self.ae = self.ae.cpu()
+                cudagc()
+            x = x.clamp(-1, 1)
+            x = x.mul(0.5).add(0.5)
+
+        t1 = time.perf_counter()
+        print(f"Done in {t1 - t0:.1f}s.")
+        for img in x.float():
+            image = self.output_process_image(F.to_pil_image(img), img_info)
+            img = self.pil2tensor(image)
+            break
+        return img
 
 MODELS_DIR = os.path.join(folder_paths.models_dir, "MLLM")
 if "MLLM" not in folder_paths.folder_names_and_paths:
@@ -482,3 +636,74 @@ class Step1XEditNode:
         ) # This is a PIL Image, but you need a resized tensor as an output. Can we optimize function? Absolutely yes but not now.
         
         return (image, );
+
+class Step1XEditLoader:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(self):
+        return {
+            "required": {
+                "step1x_edit_model":(folder_paths.get_filename_list("Step1x-Edit"),),
+                "step1x_edit_model_vae": (folder_paths.get_filename_list("Step1x-Edit"),),
+                "mllm_model": (os.listdir(folder_paths.get_folder_paths("MLLM")[0]),),
+                "offload": ("BOOLEAN", {"default": False, "tooltip": "Enable offloading the model to CPU."}),
+                "quantized": ("BOOLEAN", {"default": False, "tooltip": "Enable quantization of the dit."}),
+            }
+        }
+    
+    RETURN_TYPES = ("Step1XEdit",)
+    FUNCTION = "load_from_paths"
+    CATEGORY = "Intellicode/Step1X-Edit"
+
+    @classmethod
+    def load_from_paths(self, step1x_edit_model, step1x_edit_model_vae, mllm_model, offload, quantized):
+        
+        step1x_edit = ImageGenerator(
+            ae_path=step1x_edit_model_vae,
+            dit_path=step1x_edit_model,
+            qwen2vl_model_path=os.path.join(folder_paths.get_folder_paths("MLLM")[0], mllm_model),
+            max_length=640,
+            offload=offload,
+            quantized=quantized
+        )
+        
+        return (step1x_edit, )
+
+class Step1XEditGenerator:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(self):
+        return {
+            "required": {
+                "image": ("IMAGE", ),
+                "prompt": ("STRING", {"multiline": True, "dynamicPrompts": True}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True, "tooltip": "The random seed for generation."}),
+                "cfg": ("FLOAT", {"default": 6.0, "min": 0.0, "max": 100.0, "step":0.1, "round": 0.01}),
+                "size_level": ("INT", {"default": 512, "min": 0, "max": 32768}),
+                "num_steps": ("INT", {"default": 20, "min": 0, "max": 10000, "tooltip": "The number of diffusion steps."}),
+                "step1x_edit":("Step1XEdit",),
+            }
+        }
+    
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "generate_image"
+    CATEGORY = "Intellicode/Step1X-Edit"
+
+    @torch.inference_mode()
+    def generate_image(self, image, prompt, seed, cfg, size_level, num_steps, step1x_edit):
+        image = step1x_edit.generate_image(
+            prompt,
+            negative_prompt="",
+            ref_images=image,
+            num_samples=1,
+            num_steps=num_steps,
+            cfg_guidance=cfg,
+            seed=seed,
+            show_progress=True,
+            size_level=size_level,
+        )
+        return (image, )
