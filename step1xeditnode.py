@@ -604,8 +604,8 @@ class Step1XEditNode:
                 "step1x_edit_model":(folder_paths.get_filename_list("Step1x-Edit"),{"default": "step1x-edit-i1258-FP8.safetensors"}),
                 "step1x_edit_model_vae": (folder_paths.get_filename_list("Step1x-Edit"),{"default": "vae.safetensors"}),
                 "mllm_model": (os.listdir(folder_paths.get_folder_paths("MLLM")[0]),),
-                "offload": ("BOOLEAN", {"default": False, "tooltip": "Enable offloading the model to CPU."}),
-                "quantized": ("BOOLEAN", {"default": False, "tooltip": "Enable quantization of the dit."}),
+                "offload": ("BOOLEAN", {"default": True, "tooltip": "Enable offloading the model to CPU."}),
+                "quantized": ("BOOLEAN", {"default": True, "tooltip": "Enable quantization of the dit."}),
             }
         }
     
@@ -648,8 +648,8 @@ class Step1XEditLoader:
                 "step1x_edit_model":(folder_paths.get_filename_list("Step1x-Edit"), {"default": "step1x-edit-i1258-FP8.safetensors"}),
                 "step1x_edit_model_vae": (folder_paths.get_filename_list("Step1x-Edit"), {"default": "vae.safetensors"}),
                 "mllm_model": (os.listdir(folder_paths.get_folder_paths("MLLM")[0]),),
-                "offload": ("BOOLEAN", {"default": False, "tooltip": "Enable offloading the model to CPU."}),
-                "quantized": ("BOOLEAN", {"default": False, "tooltip": "Enable quantization of the dit."}),
+                "offload": ("BOOLEAN", {"default": True, "tooltip": "Enable offloading the model to CPU."}),
+                "quantized": ("BOOLEAN", {"default": True, "tooltip": "Enable quantization of the dit."}),
             }
         }
     
