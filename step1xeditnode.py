@@ -601,8 +601,8 @@ class Step1XEditNode:
                 "cfg": ("FLOAT", {"default": 6.0, "min": 0.0, "max": 100.0, "step":0.1, "round": 0.01}),
                 "size_level": ("INT", {"default": 512, "min": 0, "max": 32768}),
                 "num_steps": ("INT", {"default": 20, "min": 0, "max": 10000, "tooltip": "The number of diffusion steps."}),
-                "step1x_edit_model":(folder_paths.get_filename_list("Step1x-Edit"),),
-                "step1x_edit_model_vae": (folder_paths.get_filename_list("Step1x-Edit"),),
+                "step1x_edit_model":(folder_paths.get_filename_list("Step1x-Edit"),{"default": "step1x-edit-i1258-FP8.safetensors"}),
+                "step1x_edit_model_vae": (folder_paths.get_filename_list("Step1x-Edit"),{"default": "vae.safetensors"}),
                 "mllm_model": (os.listdir(folder_paths.get_folder_paths("MLLM")[0]),),
                 "offload": ("BOOLEAN", {"default": False, "tooltip": "Enable offloading the model to CPU."}),
                 "quantized": ("BOOLEAN", {"default": False, "tooltip": "Enable quantization of the dit."}),
@@ -645,8 +645,8 @@ class Step1XEditLoader:
     def INPUT_TYPES(self):
         return {
             "required": {
-                "step1x_edit_model":(folder_paths.get_filename_list("Step1x-Edit"),),
-                "step1x_edit_model_vae": (folder_paths.get_filename_list("Step1x-Edit"),),
+                "step1x_edit_model":(folder_paths.get_filename_list("Step1x-Edit"), {"default": "step1x-edit-i1258-FP8.safetensors"}),
+                "step1x_edit_model_vae": (folder_paths.get_filename_list("Step1x-Edit"), {"default": "vae.safetensors"}),
                 "mllm_model": (os.listdir(folder_paths.get_folder_paths("MLLM")[0]),),
                 "offload": ("BOOLEAN", {"default": False, "tooltip": "Enable offloading the model to CPU."}),
                 "quantized": ("BOOLEAN", {"default": False, "tooltip": "Enable quantization of the dit."}),
