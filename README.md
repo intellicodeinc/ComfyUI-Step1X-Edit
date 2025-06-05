@@ -2,12 +2,16 @@
 
 ComfyUI Custom Node for [Step1X-Edit](https://github.com/stepfun-ai/Step1X-Edit/). Noted this node may consume large VRAMs!
 
+---
+
 This repository is a modified version of [original project URL](https://github.com/quank123wip/ComfyUI-Step1X-Edit).
 Modifications were made by wonbinK in 2025.
 
 ## Modification
 - Split node into (```Step 1X Edit Loader```) Loader and (```Step 1X Edit Generator```) Generator 
 - You can find those nodes in intellicode/Step1X-Edit (ComfyUI node)
+
+---
 
 ## Installation
 
