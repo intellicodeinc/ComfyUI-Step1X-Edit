@@ -59,6 +59,7 @@ def load_models(
     device="cuda",
     max_length=256,
     dtype=torch.bfloat16,
+    
 ):
     qwen2vl_encoder = Qwen2VLEmbedder(
         qwen2vl_model_path,
@@ -123,15 +124,17 @@ class ImageGenerator:
             qwen2vl_model_path=qwen2vl_model_path,
             max_length=max_length,
             dtype=dtype,
+            device="cpu" if offload else device
         )
         if not quantized:
             self.dit = self.dit.to(dtype=torch.bfloat16)
         if not offload:
             self.dit = self.dit.to(device=self.device)
             self.ae = self.ae.to(device=self.device)
+            self.llm_encoder = self.llm_encoder.to(device=self.device)
         self.quantized = quantized 
         self.offload = offload
-
+        
     def prepare(self, prompt, img, ref_image, ref_image_raw):
         bs, _, h, w = img.shape
         bs, _, ref_h, ref_w = ref_image.shape
@@ -347,7 +350,13 @@ class ImageGenerator:
         ref_images_raw = self.load_image(ref_images_raw)
         ref_images_raw = ref_images_raw.to(self.device)
         if self.offload:
-            self.ae = self.ae.to(self.device)
+            try:
+                self.ae = self.ae.to(self.device)
+            except NotImplementedError:
+                print("ae is not moved to device")
+                self.ae = self.ae.to_empty(device=self.device)
+                self.ae = self.ae.to(self.device)
+            
         ref_images = self.ae.encode(ref_images_raw.to(self.device) * 2 - 1)
         if self.offload:
             self.ae = self.ae.cpu()
@@ -601,11 +610,11 @@ class Step1XEditNode:
                 "cfg": ("FLOAT", {"default": 6.0, "min": 0.0, "max": 100.0, "step":0.1, "round": 0.01}),
                 "size_level": ("INT", {"default": 512, "min": 0, "max": 32768}),
                 "num_steps": ("INT", {"default": 20, "min": 0, "max": 10000, "tooltip": "The number of diffusion steps."}),
-                "step1x_edit_model":(folder_paths.get_filename_list("Step1x-Edit"),{"default": "step1x-edit-i1258-FP8.safetensors"}),
-                "step1x_edit_model_vae": (folder_paths.get_filename_list("Step1x-Edit"),{"default": "vae.safetensors"}),
+                "step1x_edit_model":(folder_paths.get_filename_list("Step1x-Edit"),),
+                "step1x_edit_model_vae": (folder_paths.get_filename_list("Step1x-Edit"),),
                 "mllm_model": (os.listdir(folder_paths.get_folder_paths("MLLM")[0]),),
-                "offload": ("BOOLEAN", {"default": True, "tooltip": "Enable offloading the model to CPU."}),
-                "quantized": ("BOOLEAN", {"default": True, "tooltip": "Enable quantization of the dit."}),
+                "offload": ("BOOLEAN", {"default": False, "tooltip": "Enable offloading the model to CPU."}),
+                "quantized": ("BOOLEAN", {"default": False, "tooltip": "Enable quantization of the dit."}),
             }
         }
     
@@ -645,11 +654,11 @@ class Step1XEditLoader:
     def INPUT_TYPES(self):
         return {
             "required": {
-                "step1x_edit_model":(folder_paths.get_filename_list("Step1x-Edit"), {"default": "step1x-edit-i1258-FP8.safetensors"}),
-                "step1x_edit_model_vae": (folder_paths.get_filename_list("Step1x-Edit"), {"default": "vae.safetensors"}),
+                "step1x_edit_model":(folder_paths.get_filename_list("Step1x-Edit"),),
+                "step1x_edit_model_vae": (folder_paths.get_filename_list("Step1x-Edit"),),
                 "mllm_model": (os.listdir(folder_paths.get_folder_paths("MLLM")[0]),),
-                "offload": ("BOOLEAN", {"default": True, "tooltip": "Enable offloading the model to CPU."}),
-                "quantized": ("BOOLEAN", {"default": True, "tooltip": "Enable quantization of the dit."}),
+                "offload": ("BOOLEAN", {"default": False, "tooltip": "Enable offloading the model to CPU."}),
+                "quantized": ("BOOLEAN", {"default": False, "tooltip": "Enable quantization of the dit."}),
             }
         }
     
@@ -667,8 +676,7 @@ class Step1XEditLoader:
             max_length=640,
             offload=offload,
             quantized=quantized
-        )
-        
+        )        
         return (step1x_edit, )
 
 class Step1XEditGenerator:
@@ -695,6 +703,7 @@ class Step1XEditGenerator:
 
     @torch.inference_mode()
     def generate_image(self, image, prompt, seed, cfg, size_level, num_steps, step1x_edit):
+        
         image = step1x_edit.generate_image(
             prompt,
             negative_prompt="",
